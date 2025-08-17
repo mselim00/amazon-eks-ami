@@ -111,6 +111,19 @@ cat << EOF | sudo tee /etc/systemd/network/99-default.link.d/99-no-policy.conf
 MACAddressPolicy=none
 EOF
 
+
+### Debugging
+sudo dnf install -y tcpdump
+sudo mkdir -p /etc/systemd/system/systemd-networkd.service.d
+sudo chmod +x /usr/bin/monitor-network
+
+sudo tee /etc/systemd/system/systemd-networkd.service.d/10-loglevel-debug.conf <<'EOF'
+[Service]
+Environment=SYSTEMD_LOG_LEVEL=debug
+EOF
+
+sudo systemctl enable network-monitor.service
+
 ################################################################################
 ### SSH ########################################################################
 ################################################################################

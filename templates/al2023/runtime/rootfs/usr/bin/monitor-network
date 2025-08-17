@@ -1,0 +1,81 @@
+#!/bin/bash
+
+LOGS_DIR="/var/log/network-monitor"
+mkdir -p "${LOGS_DIR}"
+
+{
+    LINK_SHOW_LOG_FILE="${LOGS_DIR}/ip-link-show.txt"
+    > "$LINK_SHOW_LOG_FILE"
+    while true; do
+       TIMESTAMP=$(date +"%Y-%m-%dT%H:%M:%S.%3NZ")
+       echo "${TIMESTAMP}" >> "${LINK_SHOW_LOG_FILE}"
+       ip link show >> "${LINK_SHOW_LOG_FILE}"
+       sleep 0.1
+    done
+} &
+IP_SHOW_PID="$!"
+echo "Started IP link show monitor: ${IP_SHOW_PID}"
+
+{
+    ROUTE_SHOW_LOG_FILE="${LOGS_DIR}/ip-route-show.txt"
+    > "$ROUTE_SHOW_LOG_FILE"
+    while true; do
+       TIMESTAMP=$(date +"%Y-%m-%dT%H:%M:%S.%3NZ")
+       echo "${TIMESTAMP}" >> "${ROUTE_SHOW_LOG_FILE}"
+       ip route show >> "${ROUTE_SHOW_LOG_FILE}"
+       sleep 0.1
+    done
+} &
+IP_ROUTE_PID="$!"
+echo "Started IP route show monitor: ${IP_ROUTE_PID}"
+
+{
+    NETWORKCTL_LIST_LOG_FILE="${LOGS_DIR}/networkctl-list.txt"
+    > "$NETWORKCTL_LIST_LOG_FILE"
+    while true; do
+       TIMESTAMP=$(date +"%Y-%m-%dT%H:%M:%S.%3NZ")
+       echo "${TIMESTAMP}" >> "${NETWORKCTL_LIST_LOG_FILE}"
+       networkctl list >> "${NETWORKCTL_LIST_LOG_FILE}"
+       sleep 0.1
+    done
+} &
+NETWORKCTL_LIST_PID="$!"
+echo "Started networkctl list $NETWORKCTL_LIST_PID"
+
+TCPDUMP_FOLDER="${LOGS_DIR}/tcpdump"
+mkdir -p "${TCPDUMP_FOLDER}"
+/usr/sbin/tcpdump -i any -w "${TCPDUMP_FOLDER}/dump.pcap" -G 3600 -C 1000 -Z root &
+TCPDUMP_PID="$!"
+echo "Started tcpdump: ${TCPDUMP_PID}"
+
+# {
+#     PING_LOG_FILE="${LOGS_DIR}/ping-ec2.txt"
+#     > "$PING_LOG_FILE"
+#     while true; do
+#       # should be a single proc, but retry in case of failed DNS resolution
+#       timeout 3600 ping -OD -i 0.1 "ec2.us-west-2.amazonaws.com" > "${PING_LOG_FILE}" 
+#       sleep 0.1
+#     done
+# } &
+# PING_PID="$!"
+# echo "Started ping ${PING_PID}"
+
+function cleanup()
+{
+    echo "Cleaning up background processes..."
+    BACKGROUND_PIDS="${IP_SHOW_PID} ${IP_ROUTE_PID} ${TCPDUMP_PID} ${NETWORKCTL_LIST_PID}"
+    kill $BACKGROUND_PIDS
+    echo "Sent sigkill for $BACKGROUND_PIDS"
+    wait $BACKGROUND_PIDS
+    echo "Finished waiting for background processes to exit"
+}
+trap cleanup EXIT
+
+START_TIME=$(date +%s)
+while [ $(systemctl is-failed nodeadm-config) != "failed" ]; do
+  NOW=$(date +%s)
+  if [ $((NOW - START_TIME)) -ge 3600 ]; then
+    break
+  fi
+  sleep 1;
+done

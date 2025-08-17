@@ -1,0 +1,10 @@
+[Unit]
+Description=Network Monitor
+Before=nodeadm-config.service nodeadm-boot-hook.service systemd-networkd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/monitor-network
+
+[Install]
+WantedBy=multi-user.target nodeadm-config.service nodeadm-boot-hook.service systemd-networkd.service
