@@ -152,14 +152,43 @@ validate_nvidia_supported_device_list() {
   fi
 }
 
+# boot-critical NVIDIA modules that setup-nvidia.sh will modprobe. every flavor
+# must ship the four core modules
+NVIDIA_BOOT_MODULES=(nvidia nvidia-modeset nvidia-drm nvidia-uvm)
+
+validate_nvidia_boot_modules() {
+  local tree=$1
+  local flavor=$2
+  local extra_dir="/opt/nvidia/${tree}/flavors/${flavor}/lib/modules/${KERNEL_RELEASE}/extra"
+  local module_name
+
+  for module_name in "${NVIDIA_BOOT_MODULES[@]}"; do
+    if ! compgen -G "${extra_dir}/${module_name}.ko*" > /dev/null; then
+      echo "${extra_dir} is missing ${module_name}.ko"
+      exit 1
+    fi
+  done
+
+  # gdrdrv is only harvested on the open flavor, and only when the build enabled it.
+  if [ "${flavor}" = "open" ] && [ "${ENABLE_NVIDIA_GDRCOPY_DRIVER}" = "true" ]; then
+    if ! compgen -G "${extra_dir}/gdrdrv.ko*" > /dev/null; then
+      echo "${extra_dir} is missing gdrdrv.ko"
+      exit 1
+    fi
+  fi
+}
+
 if [[ "$ENABLE_ACCELERATOR" == "nvidia" ]]; then
   for tree in "${NVIDIA_TREES[@]}"; do
     validate_nvidia_tree_version "${tree}"
     validate_nvidia_supported_device_list "${tree}"
+    validate_nvidia_boot_modules "${tree}" open
+    validate_nvidia_boot_modules "${tree}" proprietary
 
     # NVIDIA publishes no aarch64 GRID runfile, so that flavor is never built there.
     if [ "$(uname -m)" != "aarch64" ]; then
       validate_nvidia_grid_modules "${tree}"
+      validate_nvidia_boot_modules "${tree}" grid
     fi
   done
 

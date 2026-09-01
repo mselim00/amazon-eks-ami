@@ -9,14 +9,6 @@ NVIDIA_TREE_ROOT="${NVIDIA_TREE_ROOT:-/opt/nvidia}"
 LIB_MODULES_DIR="${LIB_MODULES_DIR:-/lib/modules}"
 FIRMWARE_DIR="${FIRMWARE_DIR:-/usr/lib/firmware}"
 
-# Hardcoded module list. TODO: introduce a per-flavor manifest at
-# ${FLAVOR_SUBTREE}/modules.list, replace these arrays with a
-# manifest-driven loop.
-readonly REQUIRED_MODULES=(nvidia nvidia-modeset nvidia-drm nvidia-uvm)
-# TODO: use a better heuristic than just "optional," e.g. considering if it's required
-# on specific hardware
-readonly OPTIONAL_MODULES=(nvidia-peermem)
-
 KERNEL_VERSION="$(uname -r)"
 readonly KERNEL_VERSION
 readonly TREE="${NVIDIA_TREE_ROOT}/current"
@@ -57,27 +49,29 @@ if [[ ! -f "${LOADED_SENTINEL}" ]]; then
   echo "${KERNEL_VERSION}" > "${LOADED_SENTINEL}"
 fi
 
-# modprobes do not persist reboots; invocations should be unguarded
-for m in "${REQUIRED_MODULES[@]}"; do
-  modprobe "${m}"
-done
-for m in "${OPTIONAL_MODULES[@]}"; do
-  modprobe "${m}" || echo >&2 "load: optional module ${m} did not load"
-done
+# modprobes do not persist reboots; invocations should be unguarded.
+readonly EXTRA_DIR="${FLAVOR_SUBTREE}/lib/modules/${KERNEL_VERSION}/extra"
+# the nvidia module is probed first b/c other mods (e.g. gdrdrv) may not
+# declare a dependency on it
+modprobe nvidia
+for ko in "${EXTRA_DIR}"/*.ko*; do
+  module_name=$(basename "${ko}")
+  module_name="${module_name%%.ko*}"
+  case "${module_name}" in
+    # nvidia already loaded above; nvidia-peermem binds to Mellanox HCA and fails
+    # on Nitro-EFA hosts, functionality is provided thru kernel's DMA buffer instead
+    nvidia | nvidia-peermem) continue ;;
+  esac
+  modprobe "${module_name}"
 
-if [[ "${FLAVOR}" == "open" ]]; then
-  if modprobe gdrdrv; then
+  # gdrdrv registers a character device but doesn't create the device node itself,
+  # so mint /dev/gdrdrv from its /proc/devices allocation
+  if [[ "${module_name}" == "gdrdrv" ]]; then
     gdrdrv_major="$(awk '/gdrdrv/{print $1}' /proc/devices)"
-    if [[ -n "${gdrdrv_major}" ]]; then
-      rm -f /dev/gdrdrv
-      mknod -m 666 /dev/gdrdrv c "${gdrdrv_major}" 0
-    else
-      echo >&2 "load: gdrdrv loaded but no /proc/devices entry; skipping device node"
-    fi
-  else
-    echo >&2 "load: gdrdrv did not load (open flavor, optional)"
+    rm -f /dev/gdrdrv
+    mknod -m 666 /dev/gdrdrv c "${gdrdrv_major}" 0
   fi
-fi
+done
 
 # rpm db registration can carry a big time penalty; to optimize first-boot time
 # we keep this at the end so it's out of the critical path for functionality
